@@ -11,6 +11,7 @@
 import Foundation
 import XCTest
 @testable import LRCLib
+import SubtitleKit
 
 final class LiveTests: XCTestCase {
 
