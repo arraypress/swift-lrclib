@@ -1,0 +1,15 @@
+{
+  "originHash" : "daca211ab65ab88c384c5ad931e74db4c93ffd8498949e17bded9afc0fa5f1a1",
+  "pins" : [
+    {
+      "identity" : "swift-subtitle-kit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/arraypress/swift-subtitle-kit.git",
+      "state" : {
+        "revision" : "68a355c9baa3ca36ee55e028dbd4bd3106ecaa18",
+        "version" : "0.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}
