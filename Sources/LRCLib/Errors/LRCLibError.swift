@@ -24,6 +24,12 @@ public enum LRCLibError: Error, LocalizedError, Sendable, Equatable {
     /// A response did not have the documented shape.
     case malformed(String)
 
+    /// The request never got an answer — offline, DNS, TLS, a timeout.
+    case network(String)
+
+    /// The task was cancelled before LRCLIB answered.
+    case cancelled
+
     /// A lower-case phrase that reads inside a sentence.
     public var errorDescription: String? {
         switch self {
@@ -32,6 +38,8 @@ public enum LRCLibError: Error, LocalizedError, Sendable, Equatable {
         case .rateLimited(let after):
             return "LRCLIB is turning requests away" + (after.map { " (retry after \($0)s)" } ?? "")
         case .malformed(let what): return "unexpected LRCLIB response: \(what)"
+        case .network(let why): return "could not reach LRCLIB: \(why)"
+        case .cancelled: return "the request was cancelled"
         }
     }
 }

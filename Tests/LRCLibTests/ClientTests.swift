@@ -14,18 +14,22 @@ import XCTest
 final class ClientTests: XCTestCase {
 
     /// A transport that answers each request in turn and records the URLs.
-    private final class Script: @unchecked Sendable {
+    private actor Script {
         var answers: [(Int, String, [String: String])]
         var urls: [URL] = []
         var sleeps: [Int] = []
         init(_ answers: [(Int, String, [String: String])]) { self.answers = answers }
 
-        func client() -> LRCLib {
-            LRCLib(transport: { request in
-                self.urls.append(request.url!)
-                let (status, body, headers) = self.answers.removeFirst()
-                return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
-            }, sleeper: { self.sleeps.append($0) })
+        func answer(_ request: URLRequest) -> (Data, HTTPURLResponse) {
+            urls.append(request.url!)
+            let (status, body, headers) = answers.removeFirst()
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
+        }
+
+        func sleep(_ seconds: Int) { sleeps.append(seconds) }
+
+        nonisolated func client() -> LRCLib {
+            LRCLib(transport: { await self.answer($0) }, sleeper: { await self.sleep($0) })
         }
     }
 
@@ -66,28 +70,58 @@ final class ClientTests: XCTestCase {
         let script = Script([(503, "", ["Retry-After": "3"]), (429, "", [:]), (200, "[\(record)]", [:])])
         let hits = try await script.client().search("song")
         XCTAssertEqual(hits.count, 1)
-        XCTAssertEqual(script.sleeps, [3, 2], "no Retry-After: back off to two seconds")
+        let sleeps = await script.sleeps
+        XCTAssertEqual(sleeps, [3, 2], "no Retry-After: back off to two seconds")
 
         let refusing = Script([(503, "", ["Retry-After": "60"]), (503, "", ["Retry-After": "60"]), (503, "", ["Retry-After": "60"])])
         do {
             _ = try await refusing.client().lyrics(id: 1)
             XCTFail("expected rateLimited")
-        } catch let error as LRCLibError {
+        } catch {
             XCTAssertEqual(error, .rateLimited(retryAfter: 60))
         }
-        XCTAssertEqual(refusing.sleeps, [10, 10], "capped at ten seconds")
+        let capped = await refusing.sleeps
+        XCTAssertEqual(capped, [10, 10], "capped at ten seconds")
     }
 
     func testOtherFailuresAndGarbage() async throws {
         do {
             _ = try await Script([(500, "", [:])]).client().lyrics(id: 1)
             XCTFail()
-        } catch let error as LRCLibError { XCTAssertEqual(error, .http(500)) }
+        } catch { XCTAssertEqual(error, .http(500)) }
         do {
             _ = try await Script([(200, "<html>", [:])]).client().lyrics(id: 1)
             XCTFail()
-        } catch let error as LRCLibError {
+        } catch {
             guard case .malformed = error else { return XCTFail("\(error)") }
+        }
+    }
+
+    func testTransportFailuresAndCancellationAreTyped() async {
+        let offline = LRCLib(transport: { _ in throw URLError(.notConnectedToInternet) })
+        do {
+            _ = try await offline.lyrics(id: 1)
+            XCTFail("expected network")
+        } catch {
+            guard case .network = error else { return XCTFail("\(error)") }
+        }
+        for failure in [CancellationError(), URLError(.cancelled)] as [any Error] {
+            let client = LRCLib(transport: { _ in throw failure })
+            do {
+                _ = try await client.search("song")
+                XCTFail("expected cancelled")
+            } catch {
+                XCTAssertEqual(error, .cancelled)
+            }
+        }
+        // A sleeper interrupted mid-backoff is a cancellation too.
+        let script = Script([(503, "", [:])])
+        let interrupted = LRCLib(transport: { await script.answer($0) }, sleeper: { _ in throw CancellationError() })
+        do {
+            _ = try await interrupted.lyrics(id: 1)
+            XCTFail("expected cancelled")
+        } catch {
+            XCTAssertEqual(error, .cancelled)
         }
     }
 
@@ -105,7 +139,8 @@ final class ClientTests: XCTestCase {
                 guard case .invalidQuery = error else { return XCTFail("\(error)") }
             } catch { XCTFail("\(error)") }
         }
-        XCTAssertTrue(script.urls.isEmpty)
+        let urls = await script.urls
+        XCTAssertTrue(urls.isEmpty)
     }
 
     func testURLsEncodeAmpersandsPlusAndUnicode() {

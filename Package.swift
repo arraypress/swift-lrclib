@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -16,7 +16,14 @@ let package = Package(
         .package(url: "https://github.com/arraypress/swift-subtitle-kit.git", from: "0.1.0"),
     ],
     targets: [
-        .target(name: "LRCLib", dependencies: [.product(name: "SubtitleKit", package: "swift-subtitle-kit")]),
+        .target(
+            name: "LRCLib",
+            dependencies: [.product(name: "SubtitleKit", package: "swift-subtitle-kit")],
+            swiftSettings: [
+                // Async functions run on the caller's executor rather than hopping
+                // to the global pool — Swift 6.2's "nonisolated nonsending" default.
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+            ]),
         .testTarget(name: "LRCLibTests", dependencies: ["LRCLib"]),
     ]
 )

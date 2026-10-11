@@ -22,8 +22,8 @@ final class LiveTests: XCTestCase {
             return try await body()
         } catch LRCLibError.rateLimited, LRCLibError.http(500...599) {
             throw XCTSkip("LRCLIB is refusing requests")
-        } catch let error as URLError {
-            throw XCTSkip("no network: \(error.code.rawValue)")
+        } catch LRCLibError.network(let why) {
+            throw XCTSkip("no network: \(why)")
         }
     }
 

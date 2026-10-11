@@ -22,6 +22,7 @@ let file = LRCDocument(parsing: try String(contentsOfFile: "song.lrc"))
 - 🕰️ **An LRC parser for files in the wild** — `[mm:ss]` with 0–3 fraction digits and `[mm:ss:xx]`, several stamps on one line, ID tags (`[ar:]`, `[ti:]`…), `[offset:]`, enhanced `<mm:ss.xx>` word stamps (removed), section labels with no time (skipped), a BOM, and LF, CRLF, CR or U+2028 line endings. CRLF is one `Character` in Swift, so splitting on `"\n"` finds nothing — lines go through SubtitleKit's `Lines`
 - 🎬 **SRT and WebVTT** — each line lasts until the next stamp; an empty stamp (how LRC marks an instrumental break) ends a cue rather than making one; lines sharing a stamp become one two-line cue; the last line holds five seconds or to the track's end. Rendered by [swift-subtitle-kit](https://github.com/arraypress/swift-subtitle-kit)
 - 🚦 **Throttling handled** — 503 and 429 retried twice with `Retry-After`, then a typed `rateLimited`
+- 🧵 **Swift 6.2 concurrency** — every call `throws(LRCLibError)`, so a `catch` gets the library's error without a cast: offline is `.network`, a cancelled task is `.cancelled` (Swift's or URLSession's). Async calls run on the caller's executor (nonisolated-nonsending by default) and every type is `Sendable`
 - 🪪 **Polite by default** — a User-Agent naming the library and its source, as LRCLIB asks
 - 🧪 **Offline suite** — the parser, writer and caption timing on fixtures, the client on an injected transport (decoding, misses, retries, URL encoding of `&`, `+` and CJK); three live tests that skip when the service refuses
 
@@ -43,7 +44,7 @@ let file = LRCDocument(parsing: try String(contentsOfFile: "song.lrc"))
 
 ## Requirements
 
-macOS 14+ / iOS 16+ / tvOS 16+ / watchOS 9+ / visionOS 1+, Swift 6. Depends on [swift-subtitle-kit](https://github.com/arraypress/swift-subtitle-kit).
+macOS 14+ / iOS 16+ / tvOS 16+ / watchOS 9+ / visionOS 1+, Swift 6.2 (Xcode 26). Depends on [swift-subtitle-kit](https://github.com/arraypress/swift-subtitle-kit).
 
 Lyrics are the rights holders'; LRCLIB is a community database. Check the terms that apply to how you use them.
 

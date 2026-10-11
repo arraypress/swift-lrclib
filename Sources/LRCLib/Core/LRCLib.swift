@@ -46,7 +46,7 @@ public struct LRCLib: Sendable {
 
     /// The User-Agent sent when none is chosen. LRCLIB asks clients to name
     /// themselves and link to their source; override it to name your app.
-    public static let defaultUserAgent = "swift-lrclib/0.1 (+https://github.com/arraypress/swift-lrclib)"
+    public static let defaultUserAgent = "swift-lrclib/0.2 (+https://github.com/arraypress/swift-lrclib)"
 
     /// The most records one search returns. LRCLIB caps it and does not page.
     public static let searchLimit = 20
@@ -70,7 +70,7 @@ public struct LRCLib: Sendable {
                 sleeper: Sleeper? = nil) {
         self.userAgent = userAgent
         self.sleeper = sleeper ?? { seconds in
-            try await Task.sleep(nanoseconds: UInt64(max(seconds, 1)) * 1_000_000_000)
+            try await Task.sleep(for: .seconds(max(seconds, 1)))
         }
         self.transport = transport ?? { request in
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -95,7 +95,7 @@ public struct LRCLib: Sendable {
     ///     faster, and misses more.
     /// - Throws: ``LRCLibError``, never for a miss.
     public func lyrics(artist: String, track: String, album: String? = nil,
-                       duration: TimeInterval? = nil, cachedOnly: Bool = false) async throws -> Lyrics? {
+                       duration: TimeInterval? = nil, cachedOnly: Bool = false) async throws(LRCLibError) -> Lyrics? {
         let artist = try Validation.required(artist, "artist")
         let track = try Validation.required(track, "track")
         let album = try Validation.optional(album, "album")
@@ -105,7 +105,7 @@ public struct LRCLib: Sendable {
     }
 
     /// One record by its LRCLIB ID, or `nil` when there is no such record.
-    public func lyrics(id: Int) async throws -> Lyrics? {
+    public func lyrics(id: Int) async throws(LRCLibError) -> Lyrics? {
         try Validation.id(id)
         return try await record(Endpoints.get(id: id))
     }
@@ -115,7 +115,7 @@ public struct LRCLib: Sendable {
     ///
     /// - Throws: ``LRCLibError/invalidQuery(_:)`` when neither is given.
     public func search(_ query: String? = nil, track: String? = nil, artist: String? = nil,
-                       album: String? = nil) async throws -> [Lyrics] {
+                       album: String? = nil) async throws(LRCLibError) -> [Lyrics] {
         let query = try Validation.optional(query, "query")
         let track = try Validation.optional(track, "track")
         guard query != nil || track != nil else {
@@ -135,7 +135,7 @@ public struct LRCLib: Sendable {
     // MARK: - Plumbing
 
     /// One record from a `get` URL; `nil` on 404.
-    func record(_ url: URL) async throws -> Lyrics? {
+    func record(_ url: URL) async throws(LRCLibError) -> Lyrics? {
         guard let data = try await perform(url) else { return nil }
         do {
             return Lyrics(response: try JSONDecoder().decode(LyricsResponse.self, from: data))
@@ -149,12 +149,17 @@ public struct LRCLib: Sendable {
     /// seconds), else after one second and then two. LRCLIB's 503 says
     /// `ServerOverloaded` with `Retry-After: 1`; measured, it clears within
     /// a second.
-    func perform(_ url: URL, retriesLeft: Int = 2) async throws -> Data? {
+    func perform(_ url: URL, retriesLeft: Int = 2) async throws(LRCLibError) -> Data? {
         var request = URLRequest(url: url)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 20
-        let (data, response) = try await transport(request)
+        let data: Data, response: HTTPURLResponse
+        do {
+            (data, response) = try await transport(request)
+        } catch {
+            throw Self.mapped(error)
+        }
         switch response.statusCode {
         case 200...299:
             return data
@@ -163,10 +168,27 @@ public struct LRCLib: Sendable {
         case 429, 503:
             let after = response.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             guard retriesLeft > 0 else { throw LRCLibError.rateLimited(retryAfter: after) }
-            try await sleeper(min(after ?? (3 - retriesLeft), 10))
+            do {
+                try await sleeper(min(after ?? (3 - retriesLeft), 10))
+            } catch {
+                throw Self.mapped(error)
+            }
             return try await perform(url, retriesLeft: retriesLeft - 1)
         default:
             throw LRCLibError.http(response.statusCode)
+        }
+    }
+
+    /// Any failure from the transport or the sleeper as an ``LRCLibError``:
+    /// cancellation — Swift's or URLSession's — as ``LRCLibError/cancelled``,
+    /// the library's own errors unchanged, and the rest as
+    /// ``LRCLibError/network(_:)``.
+    static func mapped(_ error: any Error) -> LRCLibError {
+        switch error {
+        case let error as LRCLibError: error
+        case is CancellationError: .cancelled
+        case let error as URLError where error.code == .cancelled: .cancelled
+        default: .network(error.localizedDescription)
         }
     }
 }
